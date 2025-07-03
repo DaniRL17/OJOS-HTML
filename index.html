@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Alarma por Ojos Cerrados</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      text-align: center;
+      margin: 0;
+      padding: 0;
+      background: #f0f0f0;
+    }
+    video {
+      width: 100%;
+      max-width: 480px;
+      border: 2px solid #333;
+      border-radius: 10px;
+      margin-top: 10px;
+    }
+    #estado {
+      font-size: 1.5em;
+      margin-top: 15px;
+    }
+    button {
+      margin-top: 20px;
+      padding: 12px 20px;
+      font-size: 1em;
+      border: none;
+      border-radius: 8px;
+      background-color: crimson;
+      color: white;
+    }
+  </style>
+</head>
+<body>
+  <h2>🛡️ Alarma por Ojos Cerrados</h2>
+  <video id="video" autoplay muted playsinline></video>
+  <p id="estado">Cargando...</p>
+  <button onclick="detenerAlarma()">Detener Alarma</button>
+  <audio id="alarma" src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" preload="auto"></audio>
+
+  <!-- MediaPipe -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.min.js"></script>
+
+  <script>
+    const video = document.getElementById('video');
+    const estado = document.getElementById('estado');
+    const alarma = document.getElementById('alarma');
+    let ojosCerradosDesde = null;
+    const TIEMPO_UMBRAL = 2000;
+
+    function distancia(p1, p2) {
+      return Math.hypot(p1.x - p2.x, p1.y - p2.y);
+    }
+
+    function calcularEAR(pts, i1, i2, i3, i4, i5, i6) {
+      const A = distancia(pts[i2], pts[i6]);
+      const B = distancia(pts[i3], pts[i5]);
+      const C = distancia(pts[i1], pts[i4]);
+      return (A + B) / (2.0 * C);
+    }
+
+    function detenerAlarma() {
+      alarma.pause();
+      alarma.currentTime = 0;
+    }
+
+    const faceMesh = new FaceMesh({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+    });
+
+    faceMesh.setOptions({
+      maxNumFaces: 1,
+      refineLandmarks: true,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    faceMesh.onResults((results) => {
+      if (!results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) {
+        estado.textContent = "No se detecta rostro";
+        ojosCerradosDesde = null;
+        return;
+      }
+
+      const puntos = results.multiFaceLandmarks[0];
+      const earIzq = calcularEAR(puntos, 33, 160, 158, 133, 153, 144);
+      const earDer = calcularEAR(puntos, 362, 385, 387, 263, 373, 380);
+      const ear = (earIzq + earDer) / 2;
+
+      if (ear < 0.20) {
+        if (!ojosCerradosDesde) ojosCerradosDesde = Date.now();
+        if (Date.now() - ojosCerradosDesde > TIEMPO_UMBRAL) {
+          estado.textContent = "🚨 ¡OJOS CERRADOS!";
+          alarma.play();
+        }
+      } else {
+        ojosCerradosDesde = null;
+        estado.textContent = "Ojos abiertos 👀";
+        detenerAlarma();
+      }
+    });
+
+    async function iniciarCamara() {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: "user", // Cámara frontal
+          width: { ideal: 480 }
+        },
+        audio: false
+      });
+      video.srcObject = stream;
+
+      const camera = new Camera(video, {
+        onFrame: async () => {
+          await faceMesh.send({ image: video });
+        },
+        width: 480,
+        height: 360
+      });
+      camera.start();
+    }
+
+    iniciarCamara();
+  </script>
+</body>
+</html>
